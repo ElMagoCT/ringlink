@@ -7,7 +7,7 @@
   const realFetch = window.fetch.bind(window);
   const enc = new TextEncoder(), dec = new TextDecoder();
   const pending = new Map();
-  let mode = null, nextId = 1, uploading = false, lastState = null;
+  let mode = null, nextId = 1, uploading = false, lastState = null, stateBusy = null;
   let port = null, writer = null, reader = null;          // USB
   let ble = null, bleChain = Promise.resolve();           // Bluetooth
 
@@ -117,11 +117,13 @@
     if (!u.startsWith('/api/')) return realFetch(url, opts);
     if (!mode) return Promise.reject(new Error('not connected'));
     if (uploading && u.startsWith('/api/state') && lastState) return Promise.resolve(new Response(lastState, { status: 200 }));
+    if (u.startsWith('/api/state') && stateBusy) return stateBusy.then(() => new Response(lastState || '{}', { status: lastState ? 200 : 503 }));   // one at a time
     const id = nextId++;
     const method = (opts.method || 'GET').toUpperCase();
     const body = opts.body ? String(opts.body).replace(/[\r\n]/g, '') : '';
     const wait = waitLine(id, 15000);
     send(`@${id} ${method} ${u} ${body}`).catch(() => {});
+    if (u.startsWith('/api/state')) { stateBusy = wait.catch(() => {}); stateBusy.then(() => { stateBusy = null; }); }
     return wait.then(({ st, body: text }) => {
       if (st === 200 && text.startsWith('{"me"')) lastState = text;
       return new Response(text || '{}', { status: st >= 200 && st <= 599 ? st : 502, headers: { 'Content-Type': 'application/json' } });
