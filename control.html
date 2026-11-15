@@ -71,7 +71,7 @@ input[type=color]{width:100%;height:46px;border:1px solid var(--line);border-rad
 #lock{display:none;position:fixed;inset:0;z-index:20;background:var(--bg);align-items:center;justify-content:center;padding:24px}#lock.on{display:flex}
 .pinbox{width:100%;font-size:28px;letter-spacing:8px;text-align:center;background:var(--bg);color:var(--tx);border:1px solid var(--line);border-radius:10px;padding:10px}
 .field{flex:1;min-width:0;background:var(--bg);color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:9px;font-size:15px}
-</style><script src="usb.js"></script></head><body>
+</style><script src="link.js"></script></head><body>
 <div id="lock"><div class="card" style="width:100%;max-width:340px;text-align:center">
  <h1 style="margin-bottom:4px">LED Rings</h1><div class="sub" style="margin-bottom:14px">Enter the PIN to control the rings</div>
  <input id="pinin" class="pinbox" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off">
@@ -111,6 +111,9 @@ input[type=color]{width:100%;height:46px;border:1px solid var(--line);border-rad
   <div class="btns" style="margin-top:10px"><button class="btn" id="identall">Flash all rings</button></div></div>
  <p class="hint">Drag &#x2630; to set the course order (1 = first gate). Tap a ring to name it, set its LED count, or calibrate its battery.</p>
  <div id="list"></div>
+ <div class="card" style="margin-top:14px"><h2>Radio (all rings)</h2>
+  <div class="row"><label>Power</label><select id="txq" class="field"><option value="34">8.5 dBm (default)</option><option value="44">11 dBm</option><option value="52">13 dBm</option><option value="60">15 dBm</option><option value="68">17 dBm</option><option value="78">19.5 dBm (max)</option></select></div>
+  <div class="hint">Under each ring: signal from the host (dBm), the share of the host's messages it hears, and how many rings relay them. For gates ~50 ft apart aim for 90%+ and better than about -85 dBm. Rings out of the host's reach still work through relays. More power = more range, but some SuperMini boards get unstable above ~13 dBm.</div></div>
  <div class="card" style="margin-top:14px"><h2>Battery levels (all rings)</h2>
   <div class="row"><label>Warning</label><input type="number" step="0.05" min="3.0" max="4.0" id="warnv" class="field"><span class="sub">V</span><span class="val" id="warnp" style="width:64px"></span></div>
   <div class="row"><label>Cutoff</label><input type="number" step="0.05" min="2.9" max="3.7" id="cutv" class="field"><span class="sub">V</span><span class="val" id="cutp" style="width:64px"></span></div>
@@ -155,6 +158,7 @@ const CURVE=[[3,0],[3.2,1],[3.3,2],[3.4,4],[3.45,6],[3.5,9],[3.55,13],[3.6,19],[
 function vpct(v){if(v<=3)return 0;for(let i=1;i<CURVE.length;i++)if(v<CURVE[i][0]){const a=CURVE[i-1],b=CURVE[i];return Math.round(a[1]+(b[1]-a[1])*(v-a[0])/(b[0]-a[0]))}return 100}
 function battHints(){['warn','cut'].forEach(k=>{const v=parseFloat($('#'+k+'v').value);$('#'+k+'p').textContent=v?'≈ '+vpct(v)+' %':''})}
 $('#warnv').oninput=$('#cutv').oninput=()=>{hold.batt=Date.now()+60000;battHints()};
+$('#txq').onchange=e=>{post('/api/show',{tx:e.target.value});toast('Radio power set on all rings')};
 $('#battsave').onclick=()=>{const w=parseFloat($('#warnv').value),c=parseFloat($('#cutv').value);
  if(!(c>=2.9&&c<=3.7)){toast('Cutoff: 2.90 - 3.70 V');return}if(!(w>=c+0.05&&w<=4)){toast('Warning must be above the cutoff (max 4.00 V)');return}
  hold.batt=0;post('/api/show',{warn:Math.round(w*1000),cut:Math.round(c*1000)});toast('Battery levels saved on all rings')};
@@ -183,12 +187,16 @@ $('#identall').onclick=()=>post('/api/identify',{mac:'all'});
 function fmt(ms){if(ms<0)ms=0;const m=Math.floor(ms/60000),s=(ms%60000)/1000;return m+':'+(s<10?'0':'')+s.toFixed(1)}
 function srcText(r){return r.lsrc==1?'Measured automatically.':r.lsrc==2?'Set by hand.':'Not measured yet.'}
 function probeText(r){return r.probe==-1?' Last Detect needed the battery switched on.':r.probe==-2?' Last Detect saw no LED current - check the strip.':r.probe==-3?' Last Detect: strip longer than 136 LEDs.':''}
+function sig(r){if(!r.online)return['',''];if(r.leader)return['Hosting the Wi-Fi','var(--acc)'];if(r.bpct===undefined)return['',''];
+ const q=r.bpct>=90&&(!r.rssi||r.rssi>-85)?'var(--go)':r.bpct>=60?'var(--warn)':'var(--bad)';
+ return[(r.rssi?r.rssi+' dBm · ':'')+r.bpct+'% heard'+(r.hops?' · via '+r.hops+(r.hops>1?' relays':' relay'):' · direct'),q]}
+function nbText(r){if(!r.nb||!r.nb.length)return'';return'Hears: '+r.nb.map(([t,v])=>{const o=S.rings.find(x=>x.mac.endsWith(t));return(o?o.name:t)+' '+v+' dBm'}).join(' · ')}
 function batt(r){if(r.batt<0)return'<span class="sub">no batt</span>';const c=r.batt<=20?'var(--bad)':r.batt<=40?'var(--warn)':'var(--go)';return`<span style="color:${c}">${r.batt}%</span><br><span class="sub">${(r.mv/1000).toFixed(2)} V</span>`}
 function ringCard(r){const d=document.createElement('div');d.className='ring';d.dataset.mac=r.mac;
- d.innerHTML=`<div class="rh"><div class="grip">&#x2630;</div><div class="num"></div><div class="rinfo"><div class="rname"></div><div class="rmeta"></div></div><div class="batt"></div></div>
+ d.innerHTML=`<div class="rh"><div class="grip">&#x2630;</div><div class="num"></div><div class="rinfo"><div class="rname"></div><div class="rmeta"></div><div class="rmeta rsig"></div></div><div class="batt"></div></div>
  <div class="ed"><div class="row"><label>Name</label><input type="text" maxlength="16" class="fname"></div>
  <div class="row"><label>Size</label><select class="fsize">${SIZES.map(s=>`<option value="${s[0]}">${s[0]} in (${s[1]} LEDs)</option>`).join('')}<option value="0">Custom</option></select></div>
- <div class="row"><label>LEDs</label><input type="number" min="1" max="300" class="fleds"><button class="btn fdet">Detect</button></div><div class="hint fsrc"></div>
+ <div class="row"><label>LEDs</label><input type="number" min="1" max="300" class="fleds"><button class="btn fdet">Detect</button></div><div class="hint fsrc"></div><div class="hint fnb"></div>
  <div class="btns"><button class="btn pri fsave">Save</button><button class="btn fident">Flash it</button></div>
  <div class="hint" style="margin-top:14px">Battery calibration: measure the cell with a meter, type it in, tap Calibrate.</div>
  <div class="row"><label>Meter (V)</label><input type="number" step="0.01" min="2.5" max="4.4" class="fmeter" placeholder="e.g. 3.92"><button class="btn fcal">Calibrate</button></div></div>`;
@@ -225,6 +233,7 @@ function apply(s){if(!s||!s.show)return;S=s;fetchedAt=performance.now();const sh
  $('#splits').innerHTML=R.splits.length?R.splits.map((x,i)=>`<div><span>Lap ${x[1]} · gate ${x[0]}</span><span><b>${fmt(x[2])}</b> &nbsp;+${((x[2]-(i?R.splits[i-1][2]:0))/1000).toFixed(1)}s</span></div>`).reverse().join(''):'<div>Tap NEXT each time the pilot flies through the green gate.</div>';
  // rings
  fwApply(s);
+ if(document.activeElement!==$('#txq')&&sh.tx)$('#txq').value=sh.tx;
  if(!busy('batt')){$('#warnv').value=(sh.warn/1000).toFixed(2);$('#cutv').value=(sh.cut/1000).toFixed(2);battHints()}
  $('#pinstate').textContent=s.pin?'PIN is on. Each phone enters it once (remembered for 30 days).':'No PIN - anyone on the LED-Rings Wi-Fi can control the rings.';
  if(!dragging&&Date.now()>orderHold){const want=s.rings.slice().sort((a,b)=>(a.order||99)-(b.order||99)||a.name.localeCompare(b.name));
@@ -234,7 +243,8 @@ function apply(s){if(!s||!s.show)return;S=s;fetchedAt=performance.now();const sh
   const n=d.querySelector('.num');if(!dragging){n.textContent=r.order||'–';n.classList.toggle('z',!r.order)}
   d.querySelector('.rname').textContent=(r.leader?'★ ':'')+r.name+(r.me?' (this one)':'');
   d.querySelector('.rmeta').textContent=(r.size?r.size+' in · ':'')+r.leds+' LEDs'+(r.lsrc==1?' (auto)':r.lsrc==0?' (not set)':'')+(r.fw?' · v'+r.fw:'')+(r.online?'':' · off');
-  const src=d.querySelector('.fsrc');if(d.classList.contains('open'))src.textContent=srcText(r)+probeText(r);
+  const src=d.querySelector('.fsrc');if(d.classList.contains('open')){src.textContent=srcText(r)+probeText(r);d.querySelector('.fnb').textContent=nbText(r)}
+  const [st,col]=sig(r),se=d.querySelector('.rsig');se.textContent=st;se.style.color=col;
   d.querySelector('.batt').innerHTML=batt(r)})}
 function fwApply(s){const O=s.ota||{},vers=[...new Set(s.rings.filter(r=>r.online&&r.fw).map(r=>'v'+r.fw))];
  $('#fwinfo').textContent='Running '+(vers.join(', ')||'?')+'. To update every ring that is on, pick RingLink_x.x_update.bin from the firmware folder.';
