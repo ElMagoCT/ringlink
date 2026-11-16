@@ -1,6 +1,6 @@
 {
   "name": "RingLink",
-  "version": "2.9",
+  "version": "3.1",
   "new_install_prompt_erase": true,
   "new_install_improv_wait_time": 0,
   "builds": [
@@ -20,7 +20,7 @@
           "offset": 57344
         },
         {
-          "path": "firmware/RingLink_2.9_update.bin",
+          "path": "firmware/RingLink_3.1_update.bin",
           "offset": 65536
         }
       ]
